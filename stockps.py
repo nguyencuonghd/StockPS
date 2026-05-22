@@ -162,77 +162,90 @@ class BotPhaiSinhUI:
             self.btn_check_date.config(state="normal")
             self.btn_clear.config(state="normal")
 
-    # ---- MODE 2: CHẠY REALTIME TỐI ƯU (Bắt sự kiện đóng nến độc lập) ----
+    # ---- MODE 2: CHẠY REALTIME TỐI ƯU (Quét trễ 15 giây để ổn định dữ liệu) ----
     def realtime_loop(self):
         q = Quote(symbol='VN30F1M', source='VCI')
+        
+        print("Bot Realtime đã kích hoạt chế độ: Đợi dữ liệu sàn ổn định (Delay 15s)...")
+        
         while self.is_running_realtime:
             try:
                 now = datetime.now()
-                current_date = now.strftime('%Y-%m-%d')
-                df = q.history(start=current_date, end=current_date, interval='5m')
+                current_second = now.second
                 
-                if df is not None and len(df) >= 4:
-                    if 'datetime' in df.columns: df = df.rename(columns={'datetime': 'time'})
-                    elif 'time' not in df.columns and df.index.name == 'datetime':
-                        df = df.reset_index().rename(columns={'datetime': 'time'})
+                # CHỈ QUÉT KHI ĐỒNG HỒ BƯỚC SANG GIÂY THỨ 15 ĐẾN GIÂY THỨ 25 CỦA MỖI PHÚT
+                # Điều này đảm bảo nến trước đó đã đóng được ít nhất 15 giây trên Server sàn
+                if 15 <= current_second <= 25:
+                    current_date = now.strftime('%Y-%m-%d')
+                    df = q.history(start=current_date, end=current_date, interval='5m')
                     
-                    df = df.sort_values(by='time').reset_index(drop=True)
-                    
-                    # Lọc cô lập dữ liệu ngày hôm nay tránh dính cache
-                    df['time_str'] = df['time'].astype(str)
-                    df = df[df['time_str'].str.contains(current_date)].copy()
-                    df = df.drop(columns=['time_str']).reset_index(drop=True)
-                    
-                    if len(df) < 4:
-                        time.sleep(60)
-                        continue
+                    if df is not None and len(df) >= 4:
+                        if 'datetime' in df.columns: df = df.rename(columns={'datetime': 'time'})
+                        elif 'time' not in df.columns and df.index.name == 'datetime':
+                            df = df.reset_index().rename(columns={'datetime': 'time'})
                         
-                    # Hiển thị ticker nháy giá trị realtime đầu thanh điều khiển
-                    self.lbl_status.config(text=f"Live: {df.iloc[-1]['close']} ({now.strftime('%H:%M:%S')})")
-
-                    # Lấy cây nến đã ĐÓNG CỬA HOÀN TOÀN (Kế cuối: index -2)
-                    latest_closed_candle = df.iloc[-2]
-                    candle_time = str(latest_closed_candle['time'])
-
-                    # KIỂM TRA KHÓA THỜI GIAN: Nếu nến này chưa từng được phân tích tín hiệu
-                    if candle_time != self.last_triggered_time:
+                        df = df.sort_values(by='time').reset_index(drop=True)
                         
-                        # Tính toán bộ chỉ báo kỹ thuật lên chuỗi dữ liệu sạch
-                        df['EMA_5'] = ta.ema(df['close'], length=5)
-                        df['EMA_20'] = ta.ema(df['close'], length=20)
-                        df['RSI'] = ta.rsi(df['close'], length=14)
-                        df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+                        # Lọc cô lập dữ liệu ngày hôm nay tránh dính cache
+                        df['time_str'] = df['time'].astype(str)
+                        df = df[df['time_str'].str.contains(current_date)].copy()
+                        df = df.drop(columns=['time_str']).reset_index(drop=True)
                         
-                        current_data = df.iloc[-2] # Nến vừa đóng
-                        prev_data = df.iloc[-3]    # Nến trước đó liền kề
-                        
-                        # Khóa luôn mốc thời gian để vòng lặp 1 phút sau không chạy lại nến này nữa
-                        self.last_triggered_time = candle_time
-                        
-                        atr_val = current_data['ATR'] if current_data['ATR'] > 0 else 1.0
-                        close_px = current_data['close']
-                        
-                        # Ghi nhận chính xác mốc thời gian hệ thống phát hiện ra tín hiệu
-                        scan_time_str = now.strftime('%H:%M:%S')
-                        
-                        # --- CHỈ KIỂM TRA ĐIỀU KIỆN CHO DUY NHẤT CẶP NẾN MỚI ĐÓNG ---
-                        # LỆNH LONG
-                        if (prev_data['EMA_5'] <= prev_data['EMA_20'] and current_data['EMA_5'] > current_data['EMA_20']) and current_data['RSI'] > 45:
-                            sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1),
-                                   round(close_px + (1.5 * atr_val), 1), round(close_px + (2.5 * atr_val), 1), round(close_px + (4.0 * atr_val), 1))
-                            self.tree.insert("", 0, values=sig, tags=("LONG",))
+                        if len(df) < 4:
+                            time.sleep(1)
+                            continue
                             
-                        # LỆNH SHORT
-                        elif (prev_data['EMA_5'] >= prev_data['EMA_20'] and current_data['EMA_5'] < current_data['EMA_20']) and current_data['RSI'] < 55:
-                            sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1),
-                                   round(close_px - (1.5 * atr_val), 1), round(close_px - (2.5 * atr_val), 1), round(close_px - (4.0 * atr_val), 1))
-                            self.tree.insert("", 0, values=sig, tags=("SHORT",))
+                        # Hiển thị ticker nháy giá trị realtime đầu thanh điều khiển
+                        self.lbl_status.config(text=f"Live: {df.iloc[-1]['close']} ({now.strftime('%H:%M:%S')})")
+
+                        # Lấy cây nến đã ĐÓNG CỬA HOÀN TOÀN (Kế cuối: index -2)
+                        latest_closed_candle = df.iloc[-2]
+                        candle_time = str(latest_closed_candle['time'])
+
+                        # KIỂM TRA KHÓA THỜI GIAN: Nếu nến này chưa từng được phân tích tín hiệu
+                        if candle_time != self.last_triggered_time:
                             
+                            # Tính toán bộ chỉ báo kỹ thuật lên chuỗi dữ liệu sạch
+                            df['EMA_5'] = ta.ema(df['close'], length=5)
+                            df['EMA_20'] = ta.ema(df['close'], length=20)
+                            df['RSI'] = ta.rsi(df['close'], length=14)
+                            df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+                            
+                            current_data = df.iloc[-2] # Nến vừa đóng
+                            prev_data = df.iloc[-3]    # Nến trước đó liền kề
+                            
+                            # Khóa luôn mốc thời gian để phút sau không chạy lại nến này nữa
+                            self.last_triggered_time = candle_time
+                            
+                            atr_val = current_data['ATR'] if current_data['ATR'] > 0 else 1.0
+                            close_px = current_data['close']
+                            
+                            # Ghi nhận chính xác mốc thời gian hệ thống phát hiện ra tín hiệu
+                            scan_time_str = now.strftime('%H:%M:%S')
+                            
+                            # --- CHỈ KIỂM TRA ĐIỀU KIỆN CHO DUY NHẤT CẶP NẾN MỚI ĐÓNG ---
+                            # LỆNH LONG
+                            if (prev_data['EMA_5'] <= prev_data['EMA_20'] and current_data['EMA_5'] > current_data['EMA_20']) and current_data['RSI'] > 45:
+                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1),
+                                       round(close_px + (1.5 * atr_val), 1), round(close_px + (2.5 * atr_val), 1), round(close_px + (4.0 * atr_val), 1))
+                                self.tree.insert("", 0, values=sig, tags=("LONG",))
+                                
+                            # LỆNH SHORT
+                            elif (prev_data['EMA_5'] >= prev_data['EMA_20'] and current_data['EMA_5'] < current_data['EMA_20']) and current_data['RSI'] < 55:
+                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1),
+                                       round(close_px - (1.5 * atr_val), 1), round(close_px - (2.5 * atr_val), 1), round(close_px - (4.0 * atr_val), 1))
+                                self.tree.insert("", 0, values=sig, tags=("SHORT",))
+                    
+                    # Sau khi xử lý xong trong "khung giờ vàng" (giây thứ 15-25), cho bot ngủ 10 giây 
+                    # để đẩy đồng hồ ra khỏi khoảng an toàn này, tránh bị quét lặp trong cùng 1 phút.
+                    time.sleep(11)
+                else:
+                    # Nếu chưa đến giây thứ 15, cho bot nghỉ ngắn 1 giây rồi check lại đồng hồ hệ thống
+                    time.sleep(1)
+                    
             except Exception as e:
                 print(f"Lỗi vòng lặp realtime: {e}")
-            
-            # Cấu hình chu kỳ quét 1 phút 1 lần
-            time.sleep(60)
+                time.sleep(1)
 
 if __name__ == "__main__":
     root = tk.Tk()
