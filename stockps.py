@@ -11,10 +11,9 @@ from vnstock.api.quote import Quote
 class BotPhaiSinhUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Hệ Thống Tín Hiệu Phái Sinh VN30F1M")
-        self.root.geometry("980x550") # Nới rộng bề ngang để vừa cột mới
+        self.root.title("Hệ Thống Tín Hiệu Phái Sinh VN30F1M - Premium")
+        self.root.geometry("1100x680") # Tăng chiều cao để chứa khung hiển thị chi tiết
         
-        # Biến trạng thái chạy realtime
         self.is_running_realtime = False
         self.realtime_thread = None
         self.last_triggered_time = None
@@ -31,7 +30,6 @@ class BotPhaiSinhUI:
         self.txt_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
         self.txt_date.grid(row=0, column=1, padx=5, pady=5)
 
-        # Bộ nút bấm chức năng
         self.btn_check_date = ttk.Button(control_frame, text="Quét Lịch Sử", command=self.run_check_date)
         self.btn_check_date.grid(row=0, column=2, padx=5, pady=5)
 
@@ -44,47 +42,75 @@ class BotPhaiSinhUI:
         self.lbl_status = ttk.Label(control_frame, text="Trạng thái: Đang dừng", font=("Arial", 10, "bold"), foreground="gray")
         self.lbl_status.grid(row=0, column=5, padx=15, pady=5)
 
-        # ---- Khung Hiển Thị Bảng Dữ Liệu (Signal Table) ----
+        # ---- Khung Hiển Thị Bảng Dữ Liệu ----
         table_frame = ttk.LabelFrame(self.root, text=" Danh Sách Tín Hiệu Xuất Hiện ", padding=10)
         table_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # ĐỊNH NGHĨA LẠI CÁC CỘT (THÊM CỘT scan_time)
-        columns = ("type", "time", "scan_time", "price", "target1", "target2", "target3")
+        columns = ("type", "time", "scan_time", "price", "target1", "explanation")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
         
         self.tree.heading("type", text="Loại Lệnh")
         self.tree.heading("time", text="Thời Điểm Đóng Nến")
-        self.tree.heading("scan_time", text="Thời Điểm Quét Live") # Cột mới thêm
+        self.tree.heading("scan_time", text="Thời Điểm Quét Live")
         self.tree.heading("price", text="Giá Khớp (Close)")
         self.tree.heading("target1", text="Target 1 (+1.5 ATR)")
-        self.tree.heading("target2", text="Target 2 (+2.5 ATR)")
-        self.tree.heading("target3", text="Target 3 (+4.0 ATR)")
+        self.tree.heading("explanation", text="Giải Thích Tín Hiệu (Click dòng để xem chi tiết ở dưới)")
 
         self.tree.column("type", width=90, anchor="center")
         self.tree.column("time", width=130, anchor="center")
-        self.tree.column("scan_time", width=130, anchor="center") # Cấu hình độ rộng cột mới
+        self.tree.column("scan_time", width=130, anchor="center")
         self.tree.column("price", width=110, anchor="center")
-        self.tree.column("target1", width=120, anchor="center")
-        self.tree.column("target2", width=120, anchor="center")
-        self.tree.column("target3", width=120, anchor="center")
+        self.tree.column("target1", width=130, anchor="center")
+        self.tree.column("explanation", width=390, anchor="w")
 
-        # Thanh cuộn dọc
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Tag màu trực quan cho tín hiệu LONG (Xanh) / SHORT (Đỏ)
         self.tree.tag_configure("LONG", foreground="green", font=("Arial", 10, "bold"))
         self.tree.tag_configure("SHORT", foreground="red", font=("Arial", 10, "bold"))
 
+        # BẮT SỰ KIỆN: Khi người dùng click chọn dòng trên bảng
+        self.tree.bind("<<TreeviewSelect>>", self.on_select_line)
+
+        # ---- KHUNG PHỤ: XEM CHI TIẾT GIẢI THÍCH XUỐNG DÒNG TỰ ĐỘNG ----
+        detail_frame = ttk.LabelFrame(self.root, text=" Chi Tiết Thông Số Bộ Lọc Của Tín Hiệu Được Chọn ", padding=10)
+        detail_frame.pack(fill="x", padx=10, pady=10)
+
+        # Sử dụng widget Text (hỗ trợ wrap=tk.WORD để tự động xuống dòng mượt mà)
+        self.txt_detail = tk.Text(detail_frame, height=4, font=("Arial", 10), wrap=tk.WORD, bg="#f9f9f9", fg="#333333")
+        self.txt_detail.pack(fill="x", expand=True)
+        self.txt_detail.insert(tk.END, "Chọn một tín hiệu trên bảng để xem phân tích thông số kỹ thuật chi tiết tại đây...")
+        self.txt_detail.config(state="disabled") # Khóa lại không cho người dùng gõ đè chữ vào
+
+    def on_select_line(self, event):
+        """Hàm xử lý khi click vào dòng: Lấy cột giải thích đẩy xuống ô chi tiết"""
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+        
+        # Lấy mảng giá trị của dòng được chọn
+        item_values = self.tree.item(selected_items[0], "values")
+        if item_values and len(item_values) >= 6:
+            explanation_text = item_values[5] # Cột thứ 6 là explanation
+            
+            # Mở khóa, xóa text cũ, chèn text mới có hỗ trợ tự động xuống dòng, rồi khóa lại
+            self.txt_detail.config(state="normal")
+            self.txt_detail.delete("1.0", tk.END)
+            self.txt_detail.insert(tk.END, explanation_text)
+            self.txt_detail.config(state="disabled")
+
     def clear_table(self):
-        """Xóa sạch các hàng đang có trên bảng Treeview"""
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self.txt_detail.config(state="normal")
+        self.txt_detail.delete("1.0", tk.END)
+        self.txt_detail.insert(tk.END, "Chọn một tín hiệu trên bảng để xem phân tích thông số kỹ thuật chi tiết tại đây...")
+        self.txt_detail.config(state="disabled")
 
-    # ---- MODE 1: QUÉT LỊCH SỬ (Duyệt toàn bộ mảng data quá khứ) ----
+    # ---- MODE 1: QUÉT LỊCH SỬ ----
     def run_check_date(self):
         target_date = self.txt_date.get().strip()
         try:
@@ -107,7 +133,6 @@ class BotPhaiSinhUI:
         elif 'time' not in df.columns and df.index.name == 'datetime':
             df = df.reset_index().rename(columns={'datetime': 'time'})
 
-        # Khóa chặt chỉ lấy duy nhất ngày muốn backtest
         df['time_str'] = df['time'].astype(str)
         df = df[df['time_str'].str.contains(target_date)].copy()
         df = df.drop(columns=['time_str']).reset_index(drop=True)
@@ -116,33 +141,31 @@ class BotPhaiSinhUI:
             messagebox.showinfo("Thông báo", f"Không có dữ liệu nến 5m thuộc ngày {target_date}.")
             return
 
-        # Tính toán chỉ báo
         df['EMA_5'] = ta.ema(df['close'], length=5)
         df['EMA_20'] = ta.ema(df['close'], length=20)
         df['RSI'] = ta.rsi(df['close'], length=14)
         df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
         df = df.dropna().reset_index(drop=True)
         
-        # Quét tuần tự lịch sử
         for i in range(1, len(df)):
             current = df.iloc[i]
             prev = df.iloc[i-1]
             atr_val = current['ATR'] if current['ATR'] > 0 else 1.0
             close_px = current['close']
             
-            # Quét lịch sử thì cột "Thời điểm quét" sẽ để mặc định là "History Backtest"
+            ema20_slope = current['EMA_20'] - prev['EMA_20']
             scan_time_str = "History Backtest"
             
-            if (prev['EMA_5'] <= prev['EMA_20'] and current['EMA_5'] > current['EMA_20']) and current['RSI'] > 45:
-                sig = ("⚡ LONG", current['time'], scan_time_str, round(close_px, 1),
-                       round(close_px + (1.5 * atr_val), 1), round(close_px + (2.5 * atr_val), 1), round(close_px + (4.0 * atr_val), 1))
+            if (prev['EMA_5'] <= prev['EMA_20'] and current['EMA_5'] > current['EMA_20']) and current['RSI'] > 50 and ema20_slope > 0.15:
+                exp_text = f"[TÍN HIỆU LONG]\n• Lý do: Đường EMA5 ({round(current['EMA_5'],1)}) đã cắt lên trên đường xu hướng EMA20 ({round(current['EMA_20'],1)}).\n• Kiểm tra RSI: Chỉ số Động lượng RSI đạt {round(current['RSI'],1)} (> 50), xác nhận phe Mua đang kiểm soát.\n• Kiểm tra Độ dốc: Độ dốc EMA20 đạt +{round(ema20_slope,2)} (> 0.15), thị trường có xu hướng tăng mạnh, không phải sideway."
+                sig = ("⚡ LONG", current['time'], scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), exp_text)
                 self.tree.insert("", "end", values=sig, tags=("LONG",))
-            elif (prev['EMA_5'] >= prev['EMA_20'] and current['EMA_5'] < current['EMA_20']) and current['RSI'] < 55:
-                sig = ("🚨 SHORT", current['time'], scan_time_str, round(close_px, 1),
-                       round(close_px - (1.5 * atr_val), 1), round(close_px - (2.5 * atr_val), 1), round(close_px - (4.0 * atr_val), 1))
+                
+            elif (prev['EMA_5'] >= prev['EMA_20'] and current['EMA_5'] < current['EMA_20']) and current['RSI'] < 50 and ema20_slope < -0.15:
+                exp_text = f"[TÍN HIỆU SHORT]\n• Lý do: Đường EMA5 ({round(current['EMA_5'],1)}) đã cắt xuống dưới đường xu hướng EMA20 ({round(current['EMA_20'],1)}).\n• Kiểm tra RSI: Chỉ số Động lượng RSI giảm còn {round(current['RSI'],1)} (< 50), xác nhận áp lực Bán tháo chủ động.\n• Kiểm tra Độ dốc: Độ dốc EMA20 đạt {round(ema20_slope,2)} (< -0.15), xác nhận cấu trúc sập trend giảm uy tín."
+                sig = ("🚨 SHORT", current['time'], scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), exp_text)
                 self.tree.insert("", "end", values=sig, tags=("SHORT",))
 
-    # ---- CHUYỂN ĐỔI CHẾ ĐỘ REALTIME ----
     def toggle_realtime(self):
         if not self.is_running_realtime:
             self.is_running_realtime = True
@@ -162,77 +185,71 @@ class BotPhaiSinhUI:
             self.btn_check_date.config(state="normal")
             self.btn_clear.config(state="normal")
 
-    # ---- MODE 2: CHẠY REALTIME TỐI ƯU (Bắt sự kiện đóng nến độc lập) ----
+    # ---- MODE 2: CHẠY REALTIME TỐI ƯU ----
     def realtime_loop(self):
         q = Quote(symbol='VN30F1M', source='VCI')
         while self.is_running_realtime:
             try:
                 now = datetime.now()
-                current_date = now.strftime('%Y-%m-%d')
-                df = q.history(start=current_date, end=current_date, interval='5m')
+                current_second = now.second
                 
-                if df is not None and len(df) >= 4:
-                    if 'datetime' in df.columns: df = df.rename(columns={'datetime': 'time'})
-                    elif 'time' not in df.columns and df.index.name == 'datetime':
-                        df = df.reset_index().rename(columns={'datetime': 'time'})
+                if 15 <= current_second <= 25:
+                    current_date = now.strftime('%Y-%m-%d')
+                    df = q.history(start=current_date, end=current_date, interval='5m')
                     
-                    df = df.sort_values(by='time').reset_index(drop=True)
-                    
-                    # Lọc cô lập dữ liệu ngày hôm nay tránh dính cache
-                    df['time_str'] = df['time'].astype(str)
-                    df = df[df['time_str'].str.contains(current_date)].copy()
-                    df = df.drop(columns=['time_str']).reset_index(drop=True)
-                    
-                    if len(df) < 4:
-                        time.sleep(60)
-                        continue
+                    if df is not None and len(df) >= 4:
+                        if 'datetime' in df.columns: df = df.rename(columns={'datetime': 'time'})
+                        elif 'time' not in df.columns and df.index.name == 'datetime':
+                            df = df.reset_index().rename(columns={'datetime': 'time'})
                         
-                    # Hiển thị ticker nháy giá trị realtime đầu thanh điều khiển
-                    self.lbl_status.config(text=f"Live: {df.iloc[-1]['close']} ({now.strftime('%H:%M:%S')})")
-
-                    # Lấy cây nến đã ĐÓNG CỬA HOÀN TOÀN (Kế cuối: index -2)
-                    latest_closed_candle = df.iloc[-2]
-                    candle_time = str(latest_closed_candle['time'])
-
-                    # KIỂM TRA KHÓA THỜI GIAN: Nếu nến này chưa từng được phân tích tín hiệu
-                    if candle_time != self.last_triggered_time:
+                        df = df.sort_values(by='time').reset_index(drop=True)
+                        df['time_str'] = df['time'].astype(str)
+                        df = df[df['time_str'].str.contains(current_date)].copy()
+                        df = df.drop(columns=['time_str']).reset_index(drop=True)
                         
-                        # Tính toán bộ chỉ báo kỹ thuật lên chuỗi dữ liệu sạch
-                        df['EMA_5'] = ta.ema(df['close'], length=5)
-                        df['EMA_20'] = ta.ema(df['close'], length=20)
-                        df['RSI'] = ta.rsi(df['close'], length=14)
-                        df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
-                        
-                        current_data = df.iloc[-2] # Nến vừa đóng
-                        prev_data = df.iloc[-3]    # Nến trước đó liền kề
-                        
-                        # Khóa luôn mốc thời gian để vòng lặp 1 phút sau không chạy lại nến này nữa
-                        self.last_triggered_time = candle_time
-                        
-                        atr_val = current_data['ATR'] if current_data['ATR'] > 0 else 1.0
-                        close_px = current_data['close']
-                        
-                        # Ghi nhận chính xác mốc thời gian hệ thống phát hiện ra tín hiệu
-                        scan_time_str = now.strftime('%H:%M:%S')
-                        
-                        # --- CHỈ KIỂM TRA ĐIỀU KIỆN CHO DUY NHẤT CẶP NẾN MỚI ĐÓNG ---
-                        # LỆNH LONG
-                        if (prev_data['EMA_5'] <= prev_data['EMA_20'] and current_data['EMA_5'] > current_data['EMA_20']) and current_data['RSI'] > 45:
-                            sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1),
-                                   round(close_px + (1.5 * atr_val), 1), round(close_px + (2.5 * atr_val), 1), round(close_px + (4.0 * atr_val), 1))
-                            self.tree.insert("", 0, values=sig, tags=("LONG",))
+                        if len(df) < 4:
+                            time.sleep(1)
+                            continue
                             
-                        # LỆNH SHORT
-                        elif (prev_data['EMA_5'] >= prev_data['EMA_20'] and current_data['EMA_5'] < current_data['EMA_20']) and current_data['RSI'] < 55:
-                            sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1),
-                                   round(close_px - (1.5 * atr_val), 1), round(close_px - (2.5 * atr_val), 1), round(close_px - (4.0 * atr_val), 1))
-                            self.tree.insert("", 0, values=sig, tags=("SHORT",))
+                        self.lbl_status.config(text=f"Live: {df.iloc[-1]['close']} ({now.strftime('%H:%M:%S')})")
+
+                        latest_closed_candle = df.iloc[-2]
+                        candle_time = str(latest_closed_candle['time'])
+
+                        if candle_time != self.last_triggered_time:
+                            df['EMA_5'] = ta.ema(df['close'], length=5)
+                            df['EMA_20'] = ta.ema(df['close'], length=20)
+                            df['RSI'] = ta.rsi(df['close'], length=14)
+                            df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
                             
+                            current_data = df.iloc[-2]
+                            prev_data = df.iloc[-3]
+                            
+                            self.last_triggered_time = candle_time
+                            
+                            atr_val = current_data['ATR'] if current_data['ATR'] > 0 else 1.0
+                            close_px = current_data['close']
+                            scan_time_str = now.strftime('%H:%M:%S')
+                            
+                            ema20_slope = current_data['EMA_20'] - prev_data['EMA_20']
+                            
+                            if (prev_data['EMA_5'] <= prev_data['EMA_20'] and current_data['EMA_5'] > current_data['EMA_20']) and current_data['RSI'] > 50 and ema20_slope > 0.15:
+                                exp_text = f"[TÍN HIỆU LONG LIVE]\n• Lý do: Cắt lên xu hướng ngắn hạn.\n• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n  + EMA5 = {round(current_data['EMA_5'],1)} | EMA20 = {round(current_data['EMA_20'],1)}\n  + RSI = {round(current_data['RSI'],1)} (> 50)\n  + Độ dốc EMA20 = +{round(ema20_slope,2)} (> 0.15) -> Đủ điều kiện xác lập xu hướng tăng."
+                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), exp_text)
+                                self.tree.insert("", 0, values=sig, tags=("LONG",))
+                                
+                            elif (prev_data['EMA_5'] >= prev_data['EMA_20'] and current_data['EMA_5'] < current_data['EMA_20']) and current_data['RSI'] < 50 and ema20_slope < -0.15:
+                                exp_text = f"[TÍN HIỆU SHORT LIVE]\n• Lý do: Cắt xuống bẻ gãy xu hướng.\n• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n  + EMA5 = {round(current_data['EMA_5'],1)} | EMA20 = {round(current_data['EMA_20'],1)}\n  + RSI = {round(current_data['RSI'],1)} (< 50)\n  + Độ dốc EMA20 = {round(ema20_slope,2)} (< -0.15) -> Đủ điều kiện xác lập xu hướng sập gãy."
+                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), exp_text)
+                                self.tree.insert("", 0, values=sig, tags=("SHORT",))
+                    
+                    time.sleep(11)
+                else:
+                    time.sleep(1)
+                    
             except Exception as e:
                 print(f"Lỗi vòng lặp realtime: {e}")
-            
-            # Cấu hình chu kỳ quét 1 phút 1 lần
-            time.sleep(60)
+                time.sleep(1)
 
 if __name__ == "__main__":
     root = tk.Tk()
