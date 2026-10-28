@@ -7,11 +7,13 @@ from datetime import datetime
 import pandas as pd
 import pandas_ta as ta
 from vnstock.api.quote import Quote
+# Nhập thư viện hiển thị thông báo hệ thống
+from plyer import notification 
 
 class BotPhaiSinhUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Hệ Thống Tín Hiệu Phái Sinh VN30F1M - Khung Tốc Độ 1 Phút (1M)")
+        self.root.title("Bot Phái Sinh VN30F1M - Khung 1M Hỗ Trợ Bắn Noti Góc Màn Hình")
         self.root.geometry("1100x680")
         
         self.is_running_realtime = False
@@ -30,14 +32,13 @@ class BotPhaiSinhUI:
         self.txt_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
         self.txt_date.grid(row=0, column=1, padx=5, pady=5)
 
-        # Bộ nút bấm chức năng
         self.btn_check_date = ttk.Button(control_frame, text="Quét Lịch Sử (1M)", command=self.run_check_date)
         self.btn_check_date.grid(row=0, column=2, padx=5, pady=5)
 
         self.btn_clear = ttk.Button(control_frame, text="Clear", command=self.clear_table)
         self.btn_clear.grid(row=0, column=3, padx=5, pady=5)
 
-        self.btn_realtime = ttk.Button(control_frame, text="Bật Realtime (1M)", command=self.toggle_realtime)
+        self.btn_realtime = ttk.Button(control_frame, text="Bật Realtime + Noti", command=self.toggle_realtime)
         self.btn_realtime.grid(row=0, column=4, padx=5, pady=5)
 
         self.lbl_status = ttk.Label(control_frame, text="Trạng thái: Đang dừng", font=("Arial", 10, "bold"), foreground="gray")
@@ -73,11 +74,10 @@ class BotPhaiSinhUI:
         self.tree.tag_configure("LONG", foreground="green", font=("Arial", 10, "bold"))
         self.tree.tag_configure("SHORT", foreground="red", font=("Arial", 10, "bold"))
 
-        # Bắt sự kiện click dòng
         self.tree.bind("<<TreeviewSelect>>", self.on_select_line)
 
         # ---- KHUNG PHỤ: XEM CHI TIẾT TỰ ĐỘNG XUỐNG DÒNG ----
-        detail_frame = ttk.LabelFrame(self.root, text=" Chi Tiết Thông Số Bộ Lọc Của Tín Hiệu 1M Được Chọn ", padding=10)
+        detail_frame = ttk.LabelFrame(self.root, text=" Chi Tiết Thông Số Bộ Lọc Của Tín Hiệu Được Chọn ", padding=10)
         detail_frame.pack(fill="x", padx=10, pady=10)
 
         self.txt_detail = tk.Text(detail_frame, height=4, font=("Arial", 10), wrap=tk.WORD, bg="#f9f9f9", fg="#333333")
@@ -105,6 +105,21 @@ class BotPhaiSinhUI:
         self.txt_detail.insert(tk.END, "Chọn một tín hiệu trên bảng để xem phân tích thông số kỹ thuật chi tiết tại đây...")
         self.txt_detail.config(state="disabled")
 
+    def send_desktop_notification(self, signal_type, price, target, candle_time):
+        """Hàm kích hoạt bắn Noti lên góc phải màn hình máy tính"""
+        try:
+            title_text = f"🔥 TÍN HIỆU PHÁI SINH MỚI: {signal_type}"
+            message_text = f"Giá vào lệnh: {price} | Target 1 (+1.5 ATR): {target}\nKhung nến đóng cửa: {str(candle_time)[-8:]}"
+            
+            notification.notify(
+                title=title_text,
+                message=message_text,
+                app_name="Bot_Phai_Sinh",
+                timeout=10 # Thông báo hiển thị trong 10 giây rồi tự ẩn
+            )
+        except Exception as e:
+            print(f"Không thể hiển thị thông báo màn hình: {e}")
+
     # ---- MODE 1: QUÉT LỊCH SỬ KHUNG 1M ----
     def run_check_date(self):
         target_date = self.txt_date.get().strip()
@@ -117,7 +132,6 @@ class BotPhaiSinhUI:
         self.clear_table()
 
         q = Quote(symbol='VN30F1M', source='VCI')
-        # Cấu hình tải dữ liệu khung 1m
         df = q.history(start=target_date, end=target_date, interval='1m')
         
         if df is None or df.empty:
@@ -137,7 +151,6 @@ class BotPhaiSinhUI:
             messagebox.showinfo("Thông báo", f"Không có dữ liệu nến 1M thuộc ngày {target_date}.")
             return
 
-        # Tính toán bộ chỉ báo tối ưu riêng cho khung 1M
         df['EMA_10'] = ta.ema(df['close'], length=10)
         df['EMA_30'] = ta.ema(df['close'], length=30)
         df['RSI'] = ta.rsi(df['close'], length=14)
@@ -149,28 +162,24 @@ class BotPhaiSinhUI:
             prev = df.iloc[i-1]
             atr_val = current['ATR'] if current['ATR'] > 0 else 1.0
             close_px = current['close']
-            
-            # Tính độ dốc đường xu hướng EMA30 trên khung 1M
             ema30_slope = current['EMA_30'] - prev['EMA_30']
             scan_time_str = "History Backtest"
             
-            # ĐIỀU KIỆN LONG KHUNG 1M (EMA10 cắt lên EMA30, RSI > 50, Độ dốc xu hướng > 0.05)
             if (prev['EMA_10'] <= prev['EMA_30'] and current['EMA_10'] > current['EMA_30']) and current['RSI'] > 50 and ema30_slope > 0.05:
-                exp_text = f"[TÍN HIỆU LONG 1M]\n• Lý do: Khung 1M kích hoạt giao cắt phát tín hiệu sớm. Đường EMA10 ({round(current['EMA_10'],1)}) cắt lên trên đường xu hướng EMA30 ({round(current['EMA_30'],1)}).\n• Kiểm tra RSI: Đạt {round(current['RSI'],1)} (> 50), phe Long chính thức làm chủ khung ngắn hạn.\n• Kiểm tra Độ dốc: Độ dốc EMA30 đạt +{round(ema30_slope,2)} (> 0.05), xác nhận có lực đẩy Trend 1M rõ ràng."
+                exp_text = f"[TÍN HIỆU LONG 1M]\n• Lý do: Khung 1M kích hoạt giao cắt. Đường EMA10 ({round(current['EMA_10'],1)}) cắt lên trên đường xu hướng EMA30 ({round(current['EMA_30'],1)}).\n• Kiểm tra RSI: Đạt {round(current['RSI'],1)} (> 50), phe Long chính thức làm chủ.\n• Kiểm tra Độ dốc: Độ dốc EMA30 đạt +{round(ema30_slope,2)} (> 0.05), xác nhận có lực đẩy Trend rõ ràng."
                 sig = ("⚡ LONG", current['time'], scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), exp_text)
                 self.tree.insert("", "end", values=sig, tags=("LONG",))
                 
-            # ĐIỀU KIỆN SHORT KHUNG 1M (EMA10 cắt xuống EMA30, RSI < 50, Độ dốc xu hướng < -0.05)
             elif (prev['EMA_10'] >= prev['EMA_30'] and current['EMA_10'] < current['EMA_30']) and current['RSI'] < 50 and ema30_slope < -0.05:
-                exp_text = f"[TÍN HIỆU SHORT 1M]\n• Lý do: Khung 1M kích hoạt giao cắt phát tín hiệu sớm. Đường EMA10 ({round(current['EMA_10'],1)}) cắt xuống dưới đường xu hướng EMA30 ({round(current['EMA_30'],1)}).\n• Kiểm tra RSI: Giảm còn {round(current['RSI'],1)} (< 50), áp lực kích hoạt lệnh Short tháo chạy.\n• Kiểm tra Độ dốc: Độ dốc EMA30 đạt {round(ema30_slope,2)} (< -0.05), cấu trúc sụt giảm khung 1M được xác lập ổn định."
+                exp_text = f"[TÍN HIỆU SHORT 1M]\n• Lý do: Khung 1M kích hoạt giao cắt. Đường EMA10 ({round(current['EMA_10'],1)}) cắt xuống dưới đường xu hướng EMA30 ({round(current['EMA_30'],1)}).\n• Kiểm tra RSI: Giảm còn {round(current['RSI'],1)} (< 50), áp lực Short dứt khoát.\n• Kiểm tra Độ dốc: Độ dốc EMA30 đạt {round(ema30_slope,2)} (< -0.05), cấu trúc sụt giảm vững vàng."
                 sig = ("🚨 SHORT", current['time'], scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), exp_text)
                 self.tree.insert("", "end", values=sig, tags=("SHORT",))
 
     def toggle_realtime(self):
         if not self.is_running_realtime:
             self.is_running_realtime = True
-            self.btn_realtime.config(text="Dừng Realtime")
-            self.lbl_status.config(text="Trạng thái: Đang quét...", foreground="green")
+            self.btn_realtime.config(text="Dừng Quét Live")
+            self.lbl_status.config(text="Trạng thái: Đang quét & Chờ Noti...", foreground="green")
             self.txt_date.config(state="disabled")
             self.btn_check_date.config(state="disabled")
             self.btn_clear.config(state="disabled")
@@ -179,23 +188,22 @@ class BotPhaiSinhUI:
             self.realtime_thread.start()
         else:
             self.is_running_realtime = False
-            self.btn_realtime.config(text="Bật Realtime (1M)")
+            self.btn_realtime.config(text="Bật Realtime + Noti")
             self.lbl_status.config(text="Trạng thái: Đang dừng", foreground="gray")
             self.txt_date.config(state="normal")
             self.btn_check_date.config(state="normal")
             self.btn_clear.config(state="normal")
 
-    # ---- MODE 2: CHẠY REALTIME THEO KHUNG NẾN 1 PHÚT ----
+    # ---- MODE 2: CHẠY REALTIME PHÁT NOTI GÓC MÀN HÌNH ----
     def realtime_loop(self):
         q = Quote(symbol='VN30F1M', source='VCI')
-        print("Bot Realtime 1M đã kích hoạt...")
         
         while self.is_running_realtime:
             try:
                 now = datetime.now()
                 current_second = now.second
                 
-                # Để tối ưu nến 1M, quét ngay tại giây thứ 5 đến 12 của mỗi phút mới (khi nến vừa đóng được vài giây)
+                # Quét ở giây thứ 5 đến 12 của mỗi phút mới khi nến vừa đóng xong
                 if 5 <= current_second <= 12:
                     current_date = now.strftime('%Y-%m-%d')
                     df = q.history(start=current_date, end=current_date, interval='1m')
@@ -216,10 +224,10 @@ class BotPhaiSinhUI:
                             
                         self.lbl_status.config(text=f"Live 1M: {df.iloc[-1]['close']} ({now.strftime('%H:%M:%S')})")
 
-                        # Lấy cây nến 1 phút vừa đóng hoàn toàn (index -2)
                         latest_closed_candle = df.iloc[-2]
                         candle_time = str(latest_closed_candle['time'])
 
+                        # KIỂM TRA: Chỉ xử lý nếu đây là cây nến mới đóng hoàn toàn
                         if candle_time != self.last_triggered_time:
                             df['EMA_10'] = ta.ema(df['close'], length=10)
                             df['EMA_30'] = ta.ema(df['close'], length=30)
@@ -234,21 +242,28 @@ class BotPhaiSinhUI:
                             atr_val = current_data['ATR'] if current_data['ATR'] > 0 else 1.0
                             close_px = current_data['close']
                             scan_time_str = now.strftime('%H:%M:%S')
-                            
-                            # Độ dốc xu hướng thực tế của khung 1M
                             ema30_slope = current_data['EMA_30'] - prev_data['EMA_30']
                             
+                            # XỬ LÝ LỆNH LONG LIVE
                             if (prev_data['EMA_10'] <= prev_data['EMA_30'] and current_data['EMA_10'] > current_data['EMA_30']) and current_data['RSI'] > 50 and ema30_slope > 0.05:
-                                exp_text = f"[TÍN HIỆU LONG LIVE 1M]\n• Vị thế quét thực tế lúc: {scan_time_str}\n• Chỉ báo kỹ thuật:\n  + EMA10 = {round(current_data['EMA_10'],1)} | EMA30 = {round(current_data['EMA_30'],1)}\n  + RSI = {round(current_data['RSI'],1)} (> 50)\n  + Độ dốc EMA30 = +{round(ema30_slope,2)} (> 0.05) -> Đạt tiêu chuẩn kích hoạt lệnh Long nhanh."
-                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), exp_text)
+                                target_price = round(close_px + (1.5 * atr_val), 1)
+                                exp_text = f"[TÍN HIỆU LONG LIVE 1M]\n• Vị thế quét thực tế lúc: {scan_time_str}\n• Chỉ báo kỹ thuật:\n  + EMA10 = {round(current_data['EMA_10'],1)} | EMA30 = {round(current_data['EMA_30'],1)}\n  + RSI = {round(current_data['RSI'],1)} (> 50)\n  + Độ dốc EMA30 = +{round(ema30_slope,2)} (> 0.05) -> Đủ điều kiện kích hoạt lệnh Long."
+                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), target_price, exp_text)
                                 self.tree.insert("", 0, values=sig, tags=("LONG",))
                                 
+                                # 📢 Bắn thông báo màn hình máy tính
+                                self.send_desktop_notification("LONG", round(close_px, 1), target_price, candle_time)
+                                
+                            # XỬ LÝ LỆNH SHORT LIVE
                             elif (prev_data['EMA_10'] >= prev_data['EMA_30'] and current_data['EMA_10'] < current_data['EMA_30']) and current_data['RSI'] < 50 and ema30_slope < -0.05:
-                                exp_text = f"[TÍN HIỆU SHORT LIVE 1M]\n• Vị thế quét thực tế lúc: {scan_time_str}\n• Chỉ báo kỹ thuật:\n  + EMA10 = {round(current_data['EMA_10'],1)} | EMA30 = {round(current_data['EMA_30'],1)}\n  + RSI = {round(current_data['RSI'],1)} (< 50)\n  + Độ dốc EMA30 = {round(ema30_slope,2)} (< -0.05) -> Đạt tiêu chuẩn kích hoạt lệnh Short nhanh."
-                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), exp_text)
+                                target_price = round(close_px - (1.5 * atr_val), 1)
+                                exp_text = f"[TÍN HIỆU SHORT LIVE 1M]\n• Vị thế quét thực tế lúc: {scan_time_str}\n• Chỉ báo kỹ thuật:\n  + EMA10 = {round(current_data['EMA_10'],1)} | EMA30 = {round(current_data['EMA_30'],1)}\n  + RSI = {round(current_data['RSI'],1)} (< 50)\n  + Độ dốc EMA30 = {round(ema30_slope,2)} (< -0.05) -> Đủ điều kiện kích hoạt lệnh Short."
+                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), target_price, exp_text)
                                 self.tree.insert("", 0, values=sig, tags=("SHORT",))
+                                
+                                # 📢 Bắn thông báo màn hình máy tính
+                                self.send_desktop_notification("SHORT", round(close_px, 1), target_price, candle_time)
                     
-                    # Cho bot nghỉ 10 giây để thoát khỏi khung giờ quét của phút đó
                     time.sleep(10)
                 else:
                     time.sleep(1)
