@@ -6,7 +6,10 @@ import time
 from datetime import datetime
 import pandas as pd
 import pandas_ta as ta
+import requests
 from vnstock.api.quote import Quote
+# Nhập thư viện hiển thị thông báo hệ thống
+from plyer import notification 
 
 class BotPhaiSinhUI:
     def __init__(self, root):
@@ -46,22 +49,25 @@ class BotPhaiSinhUI:
         table_frame = ttk.LabelFrame(self.root, text=" Danh Sách Tín Hiệu Xuất Hiện ", padding=10)
         table_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        columns = ("type", "time", "scan_time", "price", "target1", "explanation")
+        columns = ("type", "time", "scan_time", "price", "target1", "resistance", "support")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
+        self.signal_explanations = {}
         
         self.tree.heading("type", text="Loại Lệnh")
         self.tree.heading("time", text="Thời Điểm Đóng Nến")
         self.tree.heading("scan_time", text="Thời Điểm Quét Live")
         self.tree.heading("price", text="Giá Khớp (Close)")
         self.tree.heading("target1", text="Target 1 (+1.5 ATR)")
-        self.tree.heading("explanation", text="Giải Thích Tín Hiệu (Click dòng để xem chi tiết ở dưới)")
+        self.tree.heading("resistance", text="Kháng Cự")
+        self.tree.heading("support", text="Hỗ Trợ")
 
         self.tree.column("type", width=90, anchor="center")
         self.tree.column("time", width=130, anchor="center")
         self.tree.column("scan_time", width=130, anchor="center")
         self.tree.column("price", width=110, anchor="center")
         self.tree.column("target1", width=130, anchor="center")
-        self.tree.column("explanation", width=390, anchor="w")
+        self.tree.column("resistance", width=120, anchor="center")
+        self.tree.column("support", width=120, anchor="center")
 
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -80,35 +86,46 @@ class BotPhaiSinhUI:
         detail_frame.pack(fill="x", padx=10, pady=10)
 
         # Sử dụng widget Text (hỗ trợ wrap=tk.WORD để tự động xuống dòng mượt mà)
-        self.txt_detail = tk.Text(detail_frame, height=4, font=("Arial", 10), wrap=tk.WORD, bg="#f9f9f9", fg="#333333")
+        self.txt_detail = tk.Text(detail_frame, height=6, font=("Arial", 10), wrap=tk.WORD, bg="#f9f9f9", fg="#333333")
         self.txt_detail.pack(fill="x", expand=True)
         self.txt_detail.insert(tk.END, "Chọn một tín hiệu trên bảng để xem phân tích thông số kỹ thuật chi tiết tại đây...")
         self.txt_detail.config(state="disabled") # Khóa lại không cho người dùng gõ đè chữ vào
 
     def on_select_line(self, event):
-        """Hàm xử lý khi click vào dòng: Lấy cột giải thích đẩy xuống ô chi tiết"""
+        """Đưa phân tích chi tiết của dòng được chọn vào khung bên dưới."""
         selected_items = self.tree.selection()
         if not selected_items:
             return
-        
-        # Lấy mảng giá trị của dòng được chọn
-        item_values = self.tree.item(selected_items[0], "values")
-        if item_values and len(item_values) >= 6:
-            explanation_text = item_values[5] # Cột thứ 6 là explanation
-            
-            # Mở khóa, xóa text cũ, chèn text mới có hỗ trợ tự động xuống dòng, rồi khóa lại
-            self.txt_detail.config(state="normal")
-            self.txt_detail.delete("1.0", tk.END)
-            self.txt_detail.insert(tk.END, explanation_text)
-            self.txt_detail.config(state="disabled")
+
+        explanation_text = self.signal_explanations.get(selected_items[0], "")
+        self.txt_detail.config(state="normal")
+        self.txt_detail.delete("1.0", tk.END)
+        self.txt_detail.insert(tk.END, explanation_text)
+        self.txt_detail.config(state="disabled")
 
     def clear_table(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self.signal_explanations.clear()
         self.txt_detail.config(state="normal")
         self.txt_detail.delete("1.0", tk.END)
         self.txt_detail.insert(tk.END, "Chọn một tín hiệu trên bảng để xem phân tích thông số kỹ thuật chi tiết tại đây...")
         self.txt_detail.config(state="disabled")
+
+    def send_desktop_notification(self, signal_type, price, target, candle_time, resistance=None, support=None):
+        """Gửi thông báo desktop; lỗi thư viện/Windows không làm gián đoạn quét tín hiệu."""
+        levels = ""
+        if resistance is not None and support is not None:
+            levels = f"\nKháng cự: {resistance} | Hỗ trợ: {support}"
+        try:
+            notification.notify(
+                title=f"{signal_type} VN30F1M - Tín hiệu mới",
+                message=f"Giá: {price} | Target: {target} | Nến: {candle_time}{levels}",
+                app_name="StockPS",
+                timeout=10,
+            )
+        except Exception as e:
+            print(f"Không thể gửi thông báo desktop: {e}")
 
     # ---- MODE 1: QUÉT LỊCH SỬ ----
     def run_check_date(self):
@@ -145,6 +162,8 @@ class BotPhaiSinhUI:
         df['EMA_20'] = ta.ema(df['close'], length=20)
         df['RSI'] = ta.rsi(df['close'], length=14)
         df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+        df['Resistance'] = df['high'].rolling(window=20).max()
+        df['Support'] = df['low'].rolling(window=20).min()
         df = df.dropna().reset_index(drop=True)
         
         for i in range(1, len(df)):
@@ -156,15 +175,39 @@ class BotPhaiSinhUI:
             ema20_slope = current['EMA_20'] - prev['EMA_20']
             scan_time_str = "History Backtest"
             
+            # Lấy giá trị kháng cự / hỗ trợ tại thời điểm nến hiện tại
+            res_val = round(current['Resistance'], 1) if 'Resistance' in current and not pd.isna(current['Resistance']) else close_px
+            sup_val = round(current['Support'], 1) if 'Support' in current and not pd.isna(current['Support']) else close_px
+
             if (prev['EMA_5'] <= prev['EMA_20'] and current['EMA_5'] > current['EMA_20']) and current['RSI'] > 50 and ema20_slope > 0.15:
-                exp_text = f"[TÍN HIỆU LONG]\n• Lý do: Đường EMA5 ({round(current['EMA_5'],1)}) đã cắt lên trên đường xu hướng EMA20 ({round(current['EMA_20'],1)}).\n• Kiểm tra RSI: Chỉ số Động lượng RSI đạt {round(current['RSI'],1)} (> 50), xác nhận phe Mua đang kiểm soát.\n• Kiểm tra Độ dốc: Độ dốc EMA20 đạt +{round(ema20_slope,2)} (> 0.15), thị trường có xu hướng tăng mạnh, không phải sideway."
-                sig = ("⚡ LONG", current['time'], scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), exp_text)
-                self.tree.insert("", "end", values=sig, tags=("LONG",))
+                exp_text = (f"[TÍN HIỆU LONG - SÓNG TĂNG]\n"
+                            f"- Giá hiện tại: {round(close_px, 1)} | Target (+1.5 ATR): {round(close_px + (1.5 * atr_val), 1)}\n"
+                            f"- 🟢 Kháng cự gần nhất (Cản trên): {res_val} (Vùng có thể chốt lời hoặc xem xét Short lướt sóng)\n"
+                            f"- 🟢 Hỗ trợ gần nhất (Cản dưới): {sup_val} (Vùng chặn lỗ an toàn)\n"
+                            f"- Lý do: EMA5 cắt lên EMA20, RSI={round(current['RSI'],1)}, Độ dốc={round(ema20_slope,2)}")
+                
+                sig = ("⚡ LONG", current['time'], scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), res_val, sup_val)
+                item_id = self.tree.insert("", "end", values=sig, tags=("LONG",))
+                self.signal_explanations[item_id] = exp_text
+                target_price = round(close_px + (1.5 * atr_val), 1)
+                self.send_desktop_notification("LONG", round(close_px, 1), target_price, current['time'], res_val, sup_val)
+                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU LONG (LỊCH SỬ)** ⚡\n🕒 Nến: `{current['time']}`\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (+1.5 ATR): `{target_price}`\n\n{exp_text}"
+                self.send_telegram_message(tele_msg)
                 
             elif (prev['EMA_5'] >= prev['EMA_20'] and current['EMA_5'] < current['EMA_20']) and current['RSI'] < 50 and ema20_slope < -0.15:
-                exp_text = f"[TÍN HIỆU SHORT]\n• Lý do: Đường EMA5 ({round(current['EMA_5'],1)}) đã cắt xuống dưới đường xu hướng EMA20 ({round(current['EMA_20'],1)}).\n• Kiểm tra RSI: Chỉ số Động lượng RSI giảm còn {round(current['RSI'],1)} (< 50), xác nhận áp lực Bán tháo chủ động.\n• Kiểm tra Độ dốc: Độ dốc EMA20 đạt {round(ema20_slope,2)} (< -0.15), xác nhận cấu trúc sập trend giảm uy tín."
-                sig = ("🚨 SHORT", current['time'], scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), exp_text)
-                self.tree.insert("", "end", values=sig, tags=("SHORT",))
+                exp_text = (f"[TÍN HIỆU SHORT - SÓNG GIẢM]\n"
+                            f"- Giá hiện tại: {round(close_px, 1)} | Target (-1.5 ATR): {round(close_px - (1.5 * atr_val), 1)}\n"
+                            f"- 🔴 Kháng cự gần nhất (Cản trên): {res_val} (Vùng mở Short hoặc phòng hộ Hedging chuẩn)\n"
+                            f"- 🔴 Hỗ trợ gần nhất (Cản dưới): {sup_val} (Vùng chốt lời kỳ vọng)\n"
+                            f"- Lý do: EMA5 cắt xuống EMA20, RSI={round(current['RSI'],1)}, Độ dốc={round(ema20_slope,2)}")
+                
+                sig = ("🚨 SHORT", current['time'], scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), res_val, sup_val)
+                item_id = self.tree.insert("", "end", values=sig, tags=("SHORT",))
+                self.signal_explanations[item_id] = exp_text
+                target_price = round(close_px - (1.5 * atr_val), 1)
+                self.send_desktop_notification("SHORT", round(close_px, 1), target_price, current['time'], res_val, sup_val)
+                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU SHORT (LỊCH SỬ)** ⚡\n🕒 Nến: `{current['time']}`\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (-1.5 ATR): `{target_price}`\n\n{exp_text}"
+                self.send_telegram_message(tele_msg)
 
     def toggle_realtime(self):
         if not self.is_running_realtime:
@@ -221,6 +264,9 @@ class BotPhaiSinhUI:
                             df['EMA_20'] = ta.ema(df['close'], length=20)
                             df['RSI'] = ta.rsi(df['close'], length=14)
                             df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+                            # Thêm Kháng cự và Hỗ trợ động dựa trên đỉnh/đáy 20 nến 5m gần nhất (Donchian / Rolling Channel)
+                            df['Resistance'] = df['high'].rolling(window=20).max()
+                            df['Support'] = df['low'].rolling(window=20).min()
                             
                             current_data = df.iloc[-2]
                             prev_data = df.iloc[-3]
@@ -232,17 +278,31 @@ class BotPhaiSinhUI:
                             scan_time_str = now.strftime('%H:%M:%S')
                             
                             ema20_slope = current_data['EMA_20'] - prev_data['EMA_20']
+                            res_val = round(current_data['Resistance'], 1) if pd.notna(current_data['Resistance']) else round(close_px, 1)
+                            sup_val = round(current_data['Support'], 1) if pd.notna(current_data['Support']) else round(close_px, 1)
                             
                             if (prev_data['EMA_5'] <= prev_data['EMA_20'] and current_data['EMA_5'] > current_data['EMA_20']) and current_data['RSI'] > 50 and ema20_slope > 0.15:
                                 exp_text = f"[TÍN HIỆU LONG LIVE]\n• Lý do: Cắt lên xu hướng ngắn hạn.\n• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n  + EMA5 = {round(current_data['EMA_5'],1)} | EMA20 = {round(current_data['EMA_20'],1)}\n  + RSI = {round(current_data['RSI'],1)} (> 50)\n  + Độ dốc EMA20 = +{round(ema20_slope,2)} (> 0.15) -> Đủ điều kiện xác lập xu hướng tăng."
-                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), exp_text)
-                                self.tree.insert("", 0, values=sig, tags=("LONG",))
+                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), res_val, sup_val)
+                                item_id = self.tree.insert("", 0, values=sig, tags=("LONG",))
+                                self.signal_explanations[item_id] = exp_text
+                                # 📢 Bắn thông báo màn hình máy tính
+                                target_price = round(close_px + (1.5 * atr_val), 1)
+                                # self.send_desktop_notification("LONG", round(close_px, 1), target_price, candle_time, res_val, sup_val)
+                                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU LONG** ⚡\n🕒 Giờ: `{scan_time_str}` (Nến: `{candle_time}`)\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (+1.5 ATR): `{round(close_px + (1.5 * atr_val), 1)}`\n\n{exp_text}"
+                                self.send_telegram_message(tele_msg)
                                 
                             elif (prev_data['EMA_5'] >= prev_data['EMA_20'] and current_data['EMA_5'] < current_data['EMA_20']) and current_data['RSI'] < 50 and ema20_slope < -0.15:
                                 exp_text = f"[TÍN HIỆU SHORT LIVE]\n• Lý do: Cắt xuống bẻ gãy xu hướng.\n• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n  + EMA5 = {round(current_data['EMA_5'],1)} | EMA20 = {round(current_data['EMA_20'],1)}\n  + RSI = {round(current_data['RSI'],1)} (< 50)\n  + Độ dốc EMA20 = {round(ema20_slope,2)} (< -0.15) -> Đủ điều kiện xác lập xu hướng sập gãy."
-                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), exp_text)
-                                self.tree.insert("", 0, values=sig, tags=("SHORT",))
-                    
+                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), res_val, sup_val)
+                                item_id = self.tree.insert("", 0, values=sig, tags=("SHORT",))
+                                self.signal_explanations[item_id] = exp_text
+                                # 📢 Bắn thông báo màn hình máy tính
+                                target_price = round(close_px - (1.5 * atr_val), 1)
+                                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU SHORT** ⚡\n🕒 Giờ: `{scan_time_str}` (Nến: `{candle_time}`)\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (+1.5 ATR): `{round(close_px - (1.5 * atr_val), 1)}`\n\n{exp_text}"
+                                self.send_telegram_message(tele_msg)
+                                # self.send_desktop_notification("SHORT", round(close_px, 1), target_price, candle_time, res_val, sup_val)
+
                     time.sleep(11)
                 else:
                     time.sleep(1)
@@ -250,6 +310,23 @@ class BotPhaiSinhUI:
             except Exception as e:
                 print(f"Lỗi vòng lặp realtime: {e}")
                 time.sleep(1)
+
+    def send_telegram_message(self, message):
+        TOKEN = "9170119862:AAEZWIOe4cdAigoOXyzYWzkfov69xExAQdY"
+        CHAT_ID = "1689615894"
+        
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "Markdown"  # Giúp định dạng chữ đậm, nghiêng nếu muốn
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=5)
+            if response.status_code != 200:
+                print(f"Lỗi gửi Telegram: {response.text}")
+        except Exception as e:
+            print(f"Không thể kết nối Telegram: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
