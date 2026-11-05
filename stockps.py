@@ -282,26 +282,38 @@ class BotPhaiSinhUI:
                             sup_val = round(current_data['Support'], 1) if pd.notna(current_data['Support']) else round(close_px, 1)
                             
                             if (prev_data['EMA_5'] <= prev_data['EMA_20'] and current_data['EMA_5'] > current_data['EMA_20']) and current_data['RSI'] > 50 and ema20_slope > 0.15:
-                                exp_text = f"[TÍN HIỆU LONG LIVE]\n• Lý do: Cắt lên xu hướng ngắn hạn.\n• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n  + EMA5 = {round(current_data['EMA_5'],1)} | EMA20 = {round(current_data['EMA_20'],1)}\n  + RSI = {round(current_data['RSI'],1)} (> 50)\n  + Độ dốc EMA20 = +{round(ema20_slope,2)} (> 0.15) -> Đủ điều kiện xác lập xu hướng tăng."
-                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), round(close_px + (1.5 * atr_val), 1), res_val, sup_val)
+                                target_price = round(close_px + (1.5 * atr_val), 1)
+                                exp_text = (f"[TÍN HIỆU LONG LIVE]\n"
+                                            f"• Giá hiện tại: {round(close_px, 1)} | Target (+1.5 ATR): {target_price}\n"
+                                            f"• 🟢 Kháng cự gần nhất (Cản trên): {res_val}\n"
+                                            f"• 🟢 Hỗ trợ gần nhất (Cản dưới): {sup_val}\n"
+                                            f"• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n"
+                                            f"  + EMA5 = {round(current_data['EMA_5'], 1)} | EMA20 = {round(current_data['EMA_20'], 1)}\n"
+                                            f"  + RSI = {round(current_data['RSI'], 1)} (> 50)\n"
+                                            f"  + Độ dốc EMA20 = +{round(ema20_slope, 2)} (> 0.15) -> Đủ điều kiện xác lập xu hướng tăng.")
+                                sig = ("⚡ LONG", candle_time, scan_time_str, round(close_px, 1), target_price, res_val, sup_val)
                                 item_id = self.tree.insert("", 0, values=sig, tags=("LONG",))
                                 self.signal_explanations[item_id] = exp_text
-                                # 📢 Bắn thông báo màn hình máy tính
-                                target_price = round(close_px + (1.5 * atr_val), 1)
-                                # self.send_desktop_notification("LONG", round(close_px, 1), target_price, candle_time, res_val, sup_val)
-                                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU LONG** ⚡\n🕒 Giờ: `{scan_time_str}` (Nến: `{candle_time}`)\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (+1.5 ATR): `{round(close_px + (1.5 * atr_val), 1)}`\n\n{exp_text}"
+                                self.send_desktop_notification("LONG", round(close_px, 1), target_price, candle_time, res_val, sup_val)
+                                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU LONG** ⚡\n🕒 Giờ: `{scan_time_str}` (Nến: `{candle_time}`)\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (+1.5 ATR): `{target_price}`\n\n{exp_text}"
                                 self.send_telegram_message(tele_msg)
                                 
                             elif (prev_data['EMA_5'] >= prev_data['EMA_20'] and current_data['EMA_5'] < current_data['EMA_20']) and current_data['RSI'] < 50 and ema20_slope < -0.15:
-                                exp_text = f"[TÍN HIỆU SHORT LIVE]\n• Lý do: Cắt xuống bẻ gãy xu hướng.\n• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n  + EMA5 = {round(current_data['EMA_5'],1)} | EMA20 = {round(current_data['EMA_20'],1)}\n  + RSI = {round(current_data['RSI'],1)} (< 50)\n  + Độ dốc EMA20 = {round(ema20_slope,2)} (< -0.15) -> Đủ điều kiện xác lập xu hướng sập gãy."
-                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), round(close_px - (1.5 * atr_val), 1), res_val, sup_val)
+                                target_price = round(close_px - (1.5 * atr_val), 1)
+                                exp_text = (f"[TÍN HIỆU SHORT LIVE]\n"
+                                            f"• Giá hiện tại: {round(close_px, 1)} | Target (-1.5 ATR): {target_price}\n"
+                                            f"• 🔴 Kháng cự gần nhất (Cản trên): {res_val}\n"
+                                            f"• 🔴 Hỗ trợ gần nhất (Cản dưới): {sup_val}\n"
+                                            f"• Chi tiết thông số quét thực tế lúc {scan_time_str}:\n"
+                                            f"  + EMA5 = {round(current_data['EMA_5'], 1)} | EMA20 = {round(current_data['EMA_20'], 1)}\n"
+                                            f"  + RSI = {round(current_data['RSI'], 1)} (< 50)\n"
+                                            f"  + Độ dốc EMA20 = {round(ema20_slope, 2)} (< -0.15) -> Đủ điều kiện xác lập xu hướng sập gãy.")
+                                sig = ("🚨 SHORT", candle_time, scan_time_str, round(close_px, 1), target_price, res_val, sup_val)
                                 item_id = self.tree.insert("", 0, values=sig, tags=("SHORT",))
                                 self.signal_explanations[item_id] = exp_text
-                                # 📢 Bắn thông báo màn hình máy tính
-                                target_price = round(close_px - (1.5 * atr_val), 1)
-                                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU SHORT** ⚡\n🕒 Giờ: `{scan_time_str}` (Nến: `{candle_time}`)\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (+1.5 ATR): `{round(close_px - (1.5 * atr_val), 1)}`\n\n{exp_text}"
+                                self.send_desktop_notification("SHORT", round(close_px, 1), target_price, candle_time, res_val, sup_val)
+                                tele_msg = f"⚡ **VN30F1M - TÍN HIỆU SHORT** ⚡\n🕒 Giờ: `{scan_time_str}` (Nến: `{candle_time}`)\n💵 Giá khớp: **{round(close_px, 1)}**\n🎯 Target (-1.5 ATR): `{target_price}`\n\n{exp_text}"
                                 self.send_telegram_message(tele_msg)
-                                # self.send_desktop_notification("SHORT", round(close_px, 1), target_price, candle_time, res_val, sup_val)
 
                     time.sleep(11)
                 else:
